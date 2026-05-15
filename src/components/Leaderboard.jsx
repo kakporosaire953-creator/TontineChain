@@ -1,21 +1,33 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Trophy, ArrowLeft, Medal, Star, TrendingUp, ShieldCheck } from 'lucide-react';
+import { Trophy, ArrowLeft, Medal, Star, TrendingUp, ShieldCheck, Loader2 } from 'lucide-react';
+import { getLeaderboard } from '../services/api';
 import AudioButton from './AudioButton';
 
 const Leaderboard = ({ onBack }) => {
-  const players = [
-    { id: 1, name: "Koffi Adjovi", score: 99, city: "Cotonou", rank: 1, trend: 'up' },
-    { id: 2, name: "Amina Soule", score: 97, city: "Parakou", rank: 2, trend: 'up' },
-    { id: 3, name: "Mourchid F.", score: 95, city: "Abomey", rank: 3, trend: 'stable' },
-    { id: 4, name: "Jean Dogbe", score: 92, city: "Porto-Novo", rank: 4, trend: 'down' },
-    { id: 5, name: "Sarah B.", score: 89, city: "Ouidah", rank: 5, trend: 'up' },
-    { id: 6, name: "Paul K.", score: 88, city: "Cotonou", rank: 6, trend: 'stable' },
-    { id: 7, name: "Fati H.", score: 85, city: "Natitingou", rank: 7, trend: 'down' },
-    { id: 8, name: "Gildas M.", score: 84, city: "Bohicon", rank: 8, trend: 'up' },
-    { id: 9, name: "Rachid T.", score: 82, city: "Kandi", rank: 9, trend: 'stable' },
-    { id: 10, name: "Noelie Z.", score: 81, city: "Djougou", rank: 10, trend: 'up' },
-  ];
+  const [players, setPlayers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchLeaderboard();
+  }, []);
+
+  const fetchLeaderboard = async () => {
+    try {
+      const res = await getLeaderboard();
+      setPlayers(res.data.map((p, i) => ({
+        id: p.id,
+        name: p.full_name || p.name,
+        score: p.score_confiance || p.score || 85,
+        city: p.city || "Bénin",
+        rank: i + 1
+      })));
+    } catch (err) {
+      console.error("Erreur leaderboard:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-tontine-darker text-white font-inter p-6 relative overflow-hidden">
@@ -39,7 +51,16 @@ const Leaderboard = ({ onBack }) => {
         </div>
 
         <div className="space-y-3">
-          {players.map((p, i) => (
+          {loading ? (
+            <div className="flex justify-center py-20">
+              <Loader2 className="w-10 h-10 animate-spin text-tontine-orange" />
+            </div>
+          ) : players.length === 0 ? (
+            <div className="text-center py-10 text-gray-500">
+              Aucune donnée de classement pour le moment.
+            </div>
+          ) : (
+            players.map((p, i) => (
             <motion.div 
               key={p.id}
               initial={{ opacity: 0, y: 10 }}
@@ -70,7 +91,7 @@ const Leaderboard = ({ onBack }) => {
                 <div className="text-[9px] text-gray-500 font-medium">SCORE</div>
               </div>
             </motion.div>
-          ))}
+          )))}
         </div>
       </div>
     </div>

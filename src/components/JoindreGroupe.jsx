@@ -1,49 +1,73 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Search, UserPlus, ShieldCheck, Users, Clock, ChevronRight, Check, Loader2 } from 'lucide-react';
-
-const DEMO_GROUPS = [
-  { id: 10, code: 'MIABE-26', name: "Tontine MIABE 2026", amount: 75000, cycle: "Mensuel", members: 12, current_cycle: 2, leader: "Dr. Koffi A.", description: "Groupe officiel du Hackathon MIABE 2026", open: true },
-  { id: 11, code: 'MKT-BJ', name: "Commerçants du Grand Marché", amount: 30000, cycle: "Hebdomadaire", members: 20, current_cycle: 5, leader: "Amina S.", description: "Réseau d'épargne des marchands de Cotonou", open: true },
-  { id: 12, code: 'TECH-01', name: "Startup Tech Bénin", amount: 50000, cycle: "Mensuel", members: 8, current_cycle: 1, leader: "Jean D.", description: "Tontine pour entrepreneurs du numérique", open: true },
-  { id: 13, code: 'EDU-BJ', name: "Fonds Éducation Bénin", amount: 20000, cycle: "Mensuel", members: 15, current_cycle: 3, leader: "Marie T.", description: "Épargne collective pour les frais scolaires", open: false },
-];
+import { getGroups, joinGroup } from '../services/api';
 
 const JoindreGroupe = ({ onBack, onJoin }) => {
+  const [availableGroups, setAvailableGroups] = useState([]);
   const [code, setCode] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [joining, setJoining] = useState(null);
   const [joined, setJoined] = useState([]);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState('discover'); // 'discover' | 'code'
+  const [tab, setTab] = useState('discover'); 
+  const [loading, setLoading] = useState(false);
 
-  const filteredGroups = DEMO_GROUPS.filter(g =>
+  useEffect(() => {
+    if (tab === 'discover') {
+      fetchGroups();
+    }
+  }, [tab]);
+
+  const fetchGroups = async () => {
+    setLoading(true);
+    try {
+      const res = await getGroups();
+      // Filtrer pour ne montrer que les groupes "ouverts" (par exemple ceux avec de la place)
+      setAvailableGroups(res.data.filter(g => (g.members_count || 0) < (g.max_members || 10)));
+    } catch (err) {
+      console.error("Erreur chargement groupes:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredGroups = availableGroups.filter(g =>
     g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    g.code.toLowerCase().includes(searchQuery.toLowerCase())
+    (g.code && g.code.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const handleJoinById = async (group) => {
-    if (joined.includes(group.id) || !group.open) return;
+    if (joined.includes(group.id)) return;
     setJoining(group.id);
-    await new Promise(r => setTimeout(r, 1200));
-    setJoining(null);
-    setJoined(prev => [...prev, group.id]);
-    onJoin(group.code);
+    try {
+      await joinGroup(group.code || group.id);
+      setJoined(prev => [...prev, group.id]);
+      onJoin(group.code || group.id);
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la jonction au groupe.");
+    } finally {
+      setJoining(null);
+    }
   };
 
   const handleJoinByCode = async (e) => {
     e.preventDefault();
     setError('');
     if (!code.trim()) { setError('Veuillez saisir un code d\'invitation.'); return; }
-    const found = DEMO_GROUPS.find(g => g.code.toLowerCase() === code.trim().toLowerCase());
-    if (!found) { setError(`Aucun groupe trouvé avec le code "${code}". Vérifiez et réessayez.`); return; }
-    if (!found.open) { setError('Ce groupe n\'accepte plus de nouveaux membres.'); return; }
+    
     setJoining('code');
-    await new Promise(r => setTimeout(r, 1200));
-    setJoining(null);
-    setJoined(prev => [...prev, found.id]);
-    onJoin(code.trim());
-    setCode('');
+    try {
+      await joinGroup(code.trim());
+      onJoin(code.trim());
+      setCode('');
+    } catch (err) {
+      console.error(err);
+      setError("Code invalide ou groupe inaccessible.");
+    } finally {
+      setJoining(null);
+    }
   };
 
   return (
@@ -124,32 +148,32 @@ const JoindreGroupe = ({ onBack, onJoin }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {filteredGroups.map((group, i) => {
                   const isJoined = joined.includes(group.id);
-                  const isJoining = joining === group.id;
+                  const isOpen = (group.current_members || 0) < (group.max_members || 10);
                   return (
                     <motion.div key={group.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
                       className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1 }}>
-                        <div style={{ width: 46, height: 46, borderRadius: 14, background: group.open ? 'rgba(16,185,129,0.1)' : 'rgba(107,114,128,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <Users size={22} color={group.open ? '#10b981' : '#6b7280'} />
+                        <div style={{ width: 46, height: 46, borderRadius: 14, background: isOpen ? 'rgba(16,185,129,0.1)' : 'rgba(107,114,128,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Users size={22} color={isOpen ? '#10b981' : '#6b7280'} />
                         </div>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
                             <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</h4>
-                            {!group.open && <span className="badge badge-warning" style={{ fontSize: 10, flexShrink: 0 }}>Complet</span>}
+                            {!isOpen && <span className="badge badge-warning" style={{ fontSize: 10, flexShrink: 0 }}>Complet</span>}
                           </div>
                           <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
-                            {group.members} membres • {group.amount.toLocaleString()} FCFA/{group.cycle} • Code: <strong>{group.code}</strong>
+                            {group.current_members}/{group.max_members} membres • {(group.contribution_amount || 0).toLocaleString()} FCFA/{group.frequency} • Code: <strong>{group.code}</strong>
                           </p>
                         </div>
                       </div>
                       <button
                         onClick={() => handleJoinById(group)}
-                        disabled={!group.open || isJoined || isJoining}
+                        disabled={!isOpen || isJoined || isJoining}
                         style={{
-                          flexShrink: 0, padding: '9px 18px', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: (!group.open || isJoined) ? 'not-allowed' : 'pointer',
-                          background: isJoined ? 'rgba(16,185,129,0.12)' : !group.open ? 'var(--bg-card-hover)' : 'linear-gradient(135deg, #f39c12, #f1c40f)',
-                          color: isJoined ? '#10b981' : !group.open ? 'var(--text-muted)' : '#0b1120',
-                          border: 'none', display: 'flex', alignItems: 'center', gap: 6, opacity: (!group.open && !isJoined) ? 0.6 : 1
+                          flexShrink: 0, padding: '9px 18px', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: (!isOpen || isJoined) ? 'not-allowed' : 'pointer',
+                          background: isJoined ? 'rgba(16,185,129,0.12)' : !isOpen ? 'var(--bg-card-hover)' : 'linear-gradient(135deg, #f39c12, #f1c40f)',
+                          color: isJoined ? '#10b981' : !isOpen ? 'var(--text-muted)' : '#0b1120',
+                          border: 'none', display: 'flex', alignItems: 'center', gap: 6, opacity: (!isOpen && !isJoined) ? 0.6 : 1
                         }}>
                         {isJoining ? <Loader2 size={14} className="animate-spin" /> : isJoined ? <><Check size={14} /> Rejoint</> : 'Rejoindre'}
                       </button>

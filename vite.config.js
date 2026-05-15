@@ -10,8 +10,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'TontineChain',
-        short_name: 'TontineChain',
+        name: 'TontiGo',
+        short_name: 'TontiGo',
         description: 'La Tontine Numérique Intelligente',
         theme_color: '#0f172a',
         background_color: '#0f172a',

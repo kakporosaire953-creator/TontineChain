@@ -12,34 +12,26 @@ import AssistantYAO from './components/AssistantYAO';
 import Messagerie from './components/Messagerie';
 import MesTontines from './components/MesTontines';
 import JoindreGroupe from './components/JoindreGroupe';
-import { getGroups, getNotificationsList, joinGroup } from './services/api';
+import { createGroup, getGroups, getNotificationsList, joinGroup } from './services/api';
 import { Menu } from 'lucide-react';
+import logoOfficial from './assets/logo_official.png';
 
 function App() {
   const [page, setPage] = useState('landing'); // 'landing' | 'login' | 'app'
   const [theme, setTheme] = useState(() => localStorage.getItem('tontine_theme') || 'dark');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState({ 
-    first_name: "Mourchid", 
-    last_name: "F.", 
+    first_name: "", 
+    last_name: "", 
     npi: "",
-    score_confiance: 95, 
-    profession: "Commerçant Import-Export",
+    score_confiance: 85, 
     preferred_language: 'fr' 
   });
   const [view, setView] = useState('dashboard');
   const [currentGroup, setCurrentGroup] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [groups, setGroups] = useState([
-    { id: 1, code: 'DAN-01', name: "Tontine des Femmes de Dantokpa", amount: 50000, cycle: "Mensuel", members: 10, current_cycle: 4, leader: "Fatou M.", description: "Groupe d'épargne pour les commerçantes du marché" },
-    { id: 2, code: 'ART-02', name: "Association des Artisans", amount: 25000, cycle: "Mensuel", members: 8, current_cycle: 2, leader: "Jean D.", description: "Épargne collective pour achats de matériel" },
-    { id: 3, code: 'MIA-03', name: "Famille Miabe", amount: 10000, cycle: "Hebdomadaire", members: 5, current_cycle: 1, leader: "Mourchid F.", description: "Tontine familiale pour événements" },
-  ]);
-  const [notifications, setNotifications] = useState([
-    { id: 1, type: 'success', title: 'Paiement confirmé', message: 'Sarah B. a versé sa cotisation dans Tontine Diamant.', time: 'À l\'instant' },
-    { id: 2, type: 'info', title: 'Nouveau Membre', message: 'Jean D. a rejoint dans Marché Dantokpa.', time: 'Il y a 2 min' },
-    { id: 4, type: 'warning', title: 'Rappel de paiement', message: 'La date limite pour "Association des Artisans" est dans 24 heures.', time: 'Il y a 5h' },
-  ]);
+  const [groups, setGroups] = useState([]);
+  const [notifications, setNotifications] = useState([]);
 
   // Theme management
   useEffect(() => {
@@ -49,12 +41,23 @@ function App() {
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
-  // Auth check
+  // Auth check - validate token against API
   useEffect(() => {
     const token = localStorage.getItem('tontine_token');
     if (token) {
-      setIsAuthenticated(true);
-      setPage('app');
+      import('./services/api').then(({ getMe }) => {
+        getMe()
+          .then(res => {
+            setUser(prev => ({ ...prev, ...res.data }));
+            setIsAuthenticated(true);
+            setPage('app');
+          })
+          .catch(() => {
+            // Token expired or invalid — clear it and show landing page
+            localStorage.removeItem('tontine_token');
+            setPage('landing');
+          });
+      });
     }
   }, []);
 
@@ -71,28 +74,25 @@ function App() {
     }
   };
 
-  const handleCreateGroup = (groupData) => {
-    const newGroup = {
-      id: groups.length + 1,
-      ...groupData,
-      current_cycle: 1,
-      members: groupData.max_members
-    };
-    setGroups([...groups, newGroup]);
-    setNotifications([{
-      id: Date.now(), type: 'info', title: 'Groupe Créé',
-      message: `La tontine "${groupData.name}" a été créée avec succès.`,
-      time: 'À l\'instant'
-    }, ...notifications]);
+  const handleCreateGroup = async (groupData) => {
+    try {
+      await createGroup(groupData);
+    } catch (err) {
+      console.error("Erreur création groupe:", err);
+    } finally {
+      await fetchInitialData();
+      setPage('app');
+    }
   };
 
   const handleJoinGroup = async (code) => {
     try {
       await joinGroup(code);
-      fetchInitialData();
     } catch (err) {
-      const joinedGroup = { id: Date.now(), name: `Groupe ${code}`, amount: 25000, cycle: "Mensuel", members: 12, current_cycle: 1 };
-      setGroups([...groups, joinedGroup]);
+      console.error("Erreur rejoindre groupe:", err);
+    } finally {
+      await fetchInitialData();
+      setPage('app');
     }
   };
 
@@ -126,12 +126,11 @@ function App() {
   }
 
   if (view === 'messagerie') {
-    return <Messagerie onBack={() => setView('dashboard')} user={user} />;
+    return <Messagerie onBack={() => setView('dashboard')} user={user} groups={groups} />;
   }
 
-  // KYC barrier
-  const isKycComplete = user?.npi && user?.npi.length > 5;
-  const effectiveView = isKycComplete ? view : 'profile';
+  // Removed KYC barrier to allow direct access to dashboard after login
+  const effectiveView = view;
 
   if (effectiveView === 'group' && currentGroup) {
     return <GroupDetails group={currentGroup} user={user} onBack={() => setView('dashboard')} />;
@@ -141,7 +140,7 @@ function App() {
     return (
       <Profile 
         user={user} 
-        onBack={() => isKycComplete ? setView('dashboard') : alert("Veuillez d'abord renseigner votre NPI pour accéder à vos tontines.")} 
+        onBack={() => (user?.npi && user.npi.length > 5) ? setView('dashboard') : alert("Veuillez d'abord renseigner votre NPI pour accéder à vos tontines.")} 
         onUpdate={(updatedUser) => { setUser(updatedUser); if (updatedUser.npi) setView('dashboard'); }}
       />
     );
@@ -202,6 +201,7 @@ function App() {
         <button onClick={() => setSidebarOpen(true)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer' }}>
           <Menu size={22} />
         </button>
+        <img src={logoOfficial} alt="Logo" style={{ width: 32, height: 32, borderRadius: '6px' }} />
         <span style={{ fontFamily: 'Playfair Display, serif', fontWeight: 700, fontSize: 16 }}>TontineChain</span>
       </div>
 

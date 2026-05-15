@@ -33,17 +33,27 @@ const Notifications = ({ notifications, onBack }) => {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.1 }}
-              className="glass-panel p-4 rounded-2xl flex gap-4 border border-white/5 hover:border-white/10 transition-all"
+              className={`glass-panel p-4 rounded-2xl flex gap-4 border transition-all ${n.read_at ? 'opacity-50 border-white/5' : 'border-tontine-orange/20 border-white/10'}`}
+              onClick={async () => {
+                if (!n.read_at) {
+                  try {
+                    const { markNotificationAsRead } = await import('../services/api');
+                    await markNotificationAsRead(n.id);
+                    n.read_at = new Date(); // Update local state for UI feedback
+                  } catch (err) { console.error(err); }
+                }
+              }}
             >
               <div className="mt-1">{getIcon(n.type)}</div>
               <div className="flex-1">
                 <div className="flex justify-between items-start mb-1">
-                  <h4 className="font-bold text-sm">{n.title}</h4>
+                  <h4 className="font-bold text-sm">{n.title || 'Notification'}</h4>
                   <span className="text-[10px] text-gray-500 flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> {n.time}
+                    <Clock className="w-3 h-3" /> {new Date(n.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
-                <p className="text-xs text-gray-400 leading-relaxed">{n.message}</p>
+                <p className="text-xs text-gray-400 leading-relaxed mb-2">{n.message || n.data?.message}</p>
+                <AudioButton label="Écouter l'alerte" textToSpeak={n.message || n.data?.message} />
               </div>
             </motion.div>
           ))}

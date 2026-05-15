@@ -17,11 +17,12 @@ import {
   Trophy,
   Star
 } from 'lucide-react';
-import api, { getMyBalance, getGroups, getLeaderboard, joinGroup, initiatePayment } from '../services/api';
+import { getMyBalance, getLeaderboard, initiatePayment, getPendingContributions } from '../services/api';
 import { translations } from '../services/translations';
 import AudioButton from './AudioButton';
 
-const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNewGroup, onOpenNotifications, onOpenLeaderboard, onJoinGroup, onNavigate }) => {
+const Dashboard = ({ user, groups = [], onLogout, onSelectGroup, onOpenProfile, onNewGroup, onOpenNotifications, onOpenLeaderboard, onJoinGroup, onNavigate }) => {
+  const [activities, setActivities] = useState([]); // Initialize empty activities
   const t = translations[user?.preferred_language || 'fr'] || translations.fr;
   const [balance, setBalance] = useState({ total_paid: 0, total_expected: 0 });
   const [leaderboard, setLeaderboard] = useState([]);
@@ -33,10 +34,18 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
   const [showPaymentProgress, setShowPaymentProgress] = useState(false);
 
   const handlePay = async (contributionId) => {
+    if (!contributionId) return;
     setShowPaymentProgress(true);
     try {
-      await new Promise(r => setTimeout(r, 3000));
-      window.open('https://fedapay.com/pay/demo', '_blank');
+      const res = await initiatePayment(contributionId);
+      if (res.data.url) {
+        window.location.href = res.data.url;
+      } else {
+        alert("Erreur lors de l'initialisation du paiement.");
+      }
+    } catch (err) {
+      console.error("Erreur paiement:", err);
+      alert("Une erreur est survenue lors de la redirection vers FedaPay.");
     } finally {
       setShowPaymentProgress(false);
     }
@@ -45,17 +54,31 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        setBalance({ total_paid: 1250000, total_expected: 2500000 });
-        setLeaderboard([]);
+        setLoading(true);
+        const [balanceRes, leaderboardRes, pendingRes] = await Promise.all([
+          getMyBalance(),
+          getLeaderboard(),
+          getPendingContributions()
+        ]);
+        
+        setBalance({
+          total_paid: balanceRes.data.total_cotise_fcfa || 0,
+          total_expected: balanceRes.data.expected_payouts_fcfa || 0
+        });
+        
+        setLeaderboard((leaderboardRes.data || []).slice(0, 3)); 
+        setActivities(pendingRes.data || []); // pending contributions
         setLoading(false);
       } catch (err) {
-        console.error("Erreur de chargement", err);
+        console.error("Erreur de chargement du dashboard", err);
         setLoading(false);
       }
     };
 
-    fetchDashboardData();
-  }, []);
+    if (user) {
+      fetchDashboardData();
+    }
+  }, [user]);
 
   if (loading) {
     return (
@@ -65,18 +88,13 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
     );
   }
 
-  // Calculate trust score color
-  const scoreColor = (user?.score_confiance || 85) >= 90 ? 'text-green-400' 
-                   : (user?.score_confiance || 85) >= 70 ? 'text-yellow-400' 
-                   : 'text-red-400';
-
   return (
     <div style={{ color: 'var(--text-primary)' }} className="font-inter relative">
 
       {/* Welcome Header */}
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: 28, fontWeight: 700, marginBottom: 4 }}>
-          Bonjour, {user?.first_name || 'Utilisateur'} 👋
+          Bonjour, {user?.first_name || 'Utilisateur'}
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: 15 }}>Voici un aperçu de vos tontines aujourd'hui</p>
       </div>
@@ -93,28 +111,28 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
             <button onClick={onOpenLeaderboard} className="text-xs text-tontine-orange hover:underline">Voir tout</button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              { name: "Koffi Adjovi", score: 99, rank: 1 },
-              { name: "Amina Soule", score: 97, rank: 2 },
-              { name: "Jean Dogbe", score: 92, rank: 3 }
-            ].map((p, i) => (
+            {leaderboard.length > 0 ? leaderboard.map((p, i) => (
               <div key={i} className="glass-panel p-4 rounded-2xl flex items-center gap-4 border border-white/5 relative overflow-hidden group hover:border-tontine-gold/30 transition-all cursor-pointer">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold
-                  ${p.rank === 1 ? 'bg-tontine-gold text-tontine-darker' : 'bg-white/10 text-gray-400'}`}>
-                  {p.rank}
+                  ${i === 0 ? 'bg-tontine-gold text-tontine-darker' : 'bg-white/10 text-gray-400'}`}>
+                  {i + 1}
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white">{p.name}</h4>
+                  <h4 className="text-sm font-bold text-white">{p.full_name || p.name}</h4>
                   <div className="flex items-center gap-1">
                     <Star className="w-3 h-3 text-tontine-gold fill-tontine-gold" />
-                    <span className="text-[10px] text-gray-400">{p.score} pts</span>
+                    <span className="text-[10px] text-gray-400">{p.score_confiance || p.score} pts</span>
                   </div>
                 </div>
                 <div className="absolute -right-2 -bottom-2 opacity-10 group-hover:opacity-20 transition-opacity">
                   <Trophy className="w-12 h-12" />
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="col-span-3 text-center py-4 text-gray-500 text-sm italic">
+                En attente de données de fiabilité...
+              </div>
+            )}
           </div>
         </div>
 
@@ -145,12 +163,12 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
                     fill="transparent"
                     strokeDasharray="175.9"
                     initial={{ strokeDashoffset: 175.9 }}
-                    animate={{ strokeDashoffset: 175.9 - (175.9 * (user?.score_confiance || 85)) / 100 }}
+                    animate={{ strokeDashoffset: 175.9 - (175.9 * (user?.score_confiance || 0)) / 100 }}
                     transition={{ duration: 1.5, ease: "easeOut" }}
                     className="text-tontine-orange"
                   />
                 </svg>
-                <span className="absolute text-xs font-bold">{user?.score_confiance || 85}</span>
+                <span className="absolute text-xs font-bold">{user?.score_confiance ?? '—'}</span>
               </div>
               <div>
                 <h1 className="text-3xl font-bold mb-1 transition-colors group-hover:text-tontine-gold flex items-center gap-2">
@@ -161,9 +179,9 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
                 <div className="flex items-center gap-3">
                   <p className="text-gray-400 flex items-center gap-2 group-hover:text-gray-200 transition-colors">
                     <TrendingUp className="w-4 h-4 text-green-400" />
-                    {t.trust_score}: <span className="font-bold text-white">Top 5% mondial</span>
+                    Score de fiabilité: <span className="font-bold text-white">{user?.score_confiance ?? '—'}/100</span>
                   </p>
-                  <AudioButton label={`Bienvenue ${user?.first_name}. Votre score de confiance est de ${user?.score_confiance || 85} sur 100. Vous faites partie de l'élite financière du pays.`} />
+                  <AudioButton label={`Bienvenue ${user?.first_name}. Votre score de confiance est de ${user?.score_confiance ?? 0} sur 100.`} />
                 </div>
               </div>
             </div>
@@ -182,8 +200,33 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
           </div>
         </motion.div>
 
+        {/* KYC Verification Banner (MIABE 2026 Compliance) */}
+        {user?.kyc_status !== 'verified' && (
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="mb-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-between gap-4"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-500/20 rounded-lg">
+                <ShieldCheck className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white">Sécurisez votre compte</h4>
+                <p className="text-[10px] text-gray-400">Prouvez votre identité avec YAO pour débloquer les tontines à haut capital.</p>
+              </div>
+            </div>
+            <button 
+              onClick={onOpenProfile}
+              className="px-4 py-2 bg-blue-500 text-white text-[10px] font-bold rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              Vérifier maintenant
+            </button>
+          </motion.div>
+        )}
+
         {/* Prochain Paiement Alert */}
-        {groups.length > 0 && (
+        {activities && activities.length > 0 && (
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -195,25 +238,27 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h4 className="font-bold text-lg">{t.next_payment}</h4>
+                  <h4 className="font-bold text-lg">{t?.next_payment || 'Prochain paiement'}</h4>
                   <AudioButton />
                 </div>
-                <p className="text-sm text-gray-300">Groupe: <span className="text-white font-bold">{groups[0].name}</span> • 50.000 FCFA</p>
+                <p className="text-sm text-gray-300">
+                  Cotisation en attente • {(activities[0]?.amount_fcfa || 0).toLocaleString()} FCFA
+                </p>
               </div>
             </div>
             <button 
-              onClick={() => handlePay(groups[0].id)}
-              disabled={payingId === groups[0].id}
+              onClick={() => handlePay(activities[0]?.id)}
+              disabled={payingId === activities[0]?.id}
               className="bg-white text-tontine-darker font-bold px-8 py-3 rounded-xl hover:bg-tontine-gold transition-all shadow-lg flex items-center gap-2"
             >
-              {payingId === groups[0].id ? <Loader2 className="w-5 h-5 animate-spin" /> : t.pay_now}
+              {payingId === activities[0]?.id ? <Loader2 className="w-5 h-5 animate-spin" /> : (t?.pay_now || 'Payer')}
             </button>
           </motion.div>
         )}
 
         {/* Groups List */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-          {groups.map((g, i) => (
+          {groups.length > 0 ? groups.map((g, i) => (
             <motion.div 
               key={g.id}
               initial={{ opacity: 0, scale: 0.95 }}
@@ -227,26 +272,26 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
                   <Users className="w-6 h-6 text-tontine-orange" />
                 </div>
                 <div className="text-right">
-                  <span className="block text-xs text-gray-500 uppercase font-bold tracking-widest">{g.cycle}</span>
-                  <span className="text-sm font-bold text-tontine-gold">{g.amount.toLocaleString()} F</span>
+                  <span className="block text-xs text-gray-400 uppercase font-bold tracking-widest">{g.frequency || g.cycle}</span>
+                  <span className="text-sm font-bold text-tontine-gold">{(g.contribution_amount || g.amount).toLocaleString()} F</span>
                 </div>
               </div>
               
               <h3 className="text-lg font-bold mb-1 group-hover:text-tontine-orange transition-colors">{g.name}</h3>
               <p className="text-xs text-gray-500 mb-4 flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3" /> Leader: {g.leader || 'Koffi A.'}
+                <ShieldCheck className="w-3 h-3" /> Leader: {g.creator?.full_name || 'Koffi A.'}
               </p>
 
               {/* Progress Bar */}
               <div className="space-y-2 mb-4">
                 <div className="flex justify-between text-[10px] font-bold uppercase tracking-tighter">
                   <span className="text-gray-400">Progression Cycle</span>
-                  <span className="text-tontine-orange">{Math.round((g.current_cycle / g.members) * 100)}%</span>
+                  <span className="text-tontine-orange">{Math.round((g.current_cycle / (g.max_members || g.members || 1)) * 100)}%</span>
                 </div>
                 <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
                   <div 
                     className="bg-gradient-to-r from-tontine-orange to-tontine-gold h-full" 
-                    style={{ width: `${(g.current_cycle / g.members) * 100}%` }} 
+                    style={{ width: `${(g.current_cycle / (g.max_members || g.members || 1)) * 100}%` }} 
                   />
                 </div>
               </div>
@@ -256,12 +301,28 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
                   {[1,2,3].map(z => (
                     <div key={z} className="w-6 h-6 rounded-full border-2 border-tontine-darker bg-gray-700 flex items-center justify-center text-[8px] font-bold">U{z}</div>
                   ))}
-                  <div className="w-6 h-6 rounded-full border-2 border-tontine-darker bg-tontine-orange text-tontine-darker flex items-center justify-center text-[8px] font-bold">+{g.members - 3}</div>
+                  <div className="w-6 h-6 rounded-full border-2 border-tontine-darker bg-tontine-orange text-tontine-darker flex items-center justify-center text-[8px] font-bold">+{(g.max_members || g.members) - 3}</div>
                 </div>
                 <ChevronRight className="w-4 h-4 text-gray-600 group-hover:text-tontine-orange transition-all group-hover:translate-x-1" />
               </div>
             </motion.div>
-          ))}
+          )) : (
+            <div className="col-span-full py-20 flex flex-col items-center justify-center glass-panel rounded-3xl border-2 border-dashed border-white/5">
+              <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
+                <Users className="w-10 h-10 text-gray-600" />
+              </div>
+              <h3 className="text-xl font-bold mb-2">Aucune tontine active</h3>
+              <p className="text-gray-500 text-sm mb-8 text-center max-w-xs">Vous ne faites partie d'aucun groupe pour le moment. Créez-en un ou rejoignez un cercle existant.</p>
+              <div className="flex gap-4">
+                <button onClick={onNewGroup} className="btn-primary px-8 py-3 rounded-xl flex items-center gap-2">
+                  <Plus className="w-5 h-5" /> Créer
+                </button>
+                <button onClick={() => onNavigate('join')} className="bg-white/5 hover:bg-white/10 px-8 py-3 rounded-xl transition-all border border-white/10">
+                  Rejoindre
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Live Activity Feed */}
@@ -270,20 +331,21 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
             <Activity className="w-4 h-4" /> Activité en direct
           </h3>
           <div className="glass-panel p-2 rounded-2xl border border-white/5 divide-y divide-white/5">
-            {[
-              { user: "Sarah B.", action: "a versé sa cotisation", target: "Tontine Diamant", time: "À l'instant" },
-              { user: "Jean D.", action: "a rejoint", target: "Marché Dantokpa", time: "Il y a 2 min" }
-            ].map((act, i) => (
+            {activities.length > 0 ? activities.map((act, i) => (
               <div key={i} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
                 <div className="flex items-center gap-3">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                   <p className="text-xs">
-                    <span className="font-bold text-white">{act.user}</span> {act.action} dans <span className="text-tontine-gold">{act.target}</span>
+                    Cotisation en attente • <span className="text-tontine-gold font-bold">{(act.amount_fcfa || 0).toLocaleString()} FCFA</span>
                   </p>
                 </div>
-                <span className="text-[10px] text-gray-500">{act.time}</span>
+                <span className="text-[10px] text-gray-500">ID: {act.id}</span>
               </div>
-            ))}
+            )) : (
+              <div className="p-8 text-center text-gray-500 text-xs italic">
+                Aucune activité récente. Les événements s'afficheront ici en temps réel.
+              </div>
+            )}
           </div>
         </div>
 
@@ -321,7 +383,7 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
             <div className="flex justify-between items-start mb-4">
               <div>
                 <p className="text-gray-400 text-sm mb-1">{t.expected_gains}</p>
-                <h3 className="text-3xl font-bold font-playfair">{(groups.reduce((acc, g) => acc + (g.amount * g.members), 0)).toLocaleString()} <span className="text-lg text-tontine-orange">FCFA</span></h3>
+                <h3 className="text-3xl font-bold font-playfair">{(groups.reduce((acc, g) => acc + ((g.contribution_amount || g.amount || 0) * (g.max_members || g.members || 0)), 0)).toLocaleString()} <span className="text-lg text-tontine-orange">FCFA</span></h3>
               </div>
               <div className="p-3 bg-white/5 rounded-xl text-blue-400">
                 <TrendingUp className="w-6 h-6" />
@@ -361,58 +423,6 @@ const Dashboard = ({ user, groups, onLogout, onSelectGroup, onOpenProfile, onNew
           </motion.div>
         </div>
 
-        {/* Groups List */}
-        <div className="mb-6">
-          <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-            <Users className="w-6 h-6 text-tontine-orange" />
-            {t.active_tontines}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {groups.map((group, index) => (
-              <motion.div 
-                key={group.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.1 * index }}
-                onClick={() => onSelectGroup(group)}
-                className="glass-panel p-6 rounded-2xl hover:border-tontine-orange/30 transition-all cursor-pointer group"
-              >
-                <div className="flex justify-between items-start mb-4">
-                  <h3 className="text-xl font-bold">{group.name}</h3>
-                  <span className="bg-white/10 text-xs px-3 py-1 rounded-full text-tontine-gold">Cycle {group.current_cycle}/{group.members}</span>
-                </div>
-                
-                <div className="space-y-2 mb-6">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-400">Cotisation</span>
-                    <span className="font-bold">{group.amount.toLocaleString()} FCFA</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-400">Fréquence</span>
-                    <span>{group.cycle}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-400">Membres</span>
-                    <span>{group.members} personnes</span>
-                  </div>
-                </div>
-
-                <div className="w-full h-2 bg-tontine-dark rounded-full overflow-hidden mb-4">
-                  <div 
-                    className="h-full bg-gradient-to-r from-tontine-orange to-tontine-gold" 
-                    style={{ width: `${(group.current_cycle / group.members) * 100}%` }}
-                  />
-                </div>
-
-                <div className="flex justify-between items-center mt-4 pt-4 border-t border-white/5 text-sm">
-                  <span className="text-tontine-orange group-hover:underline">Gérer ou payer</span>
-                  <ChevronRight className="w-5 h-5 text-gray-500 group-hover:text-tontine-orange transition-colors" />
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-        
         {/* Google Translate Widget for Jury */}
         <div className="mt-8 flex justify-center opacity-70 hover:opacity-100 transition-opacity">
           <div id="google_translate_element" className="rounded-lg overflow-hidden border border-white/10 shadow-lg"></div>

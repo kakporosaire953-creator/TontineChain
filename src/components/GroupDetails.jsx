@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ArrowLeft, 
@@ -12,44 +12,61 @@ import {
   Wallet,
   Loader2,
   ArrowRightLeft,
-  ShieldCheck
+  ShieldCheck,
+  Plus,
+  FileDown
 } from 'lucide-react';
-import { getGroupStats, submitBid, proposeSwap, castVote } from '../services/api';
+import { castVote, downloadContract, getGroupDetails, inviteMember, proposeSwap, startGroup, submitBid } from '../services/api';
 
 const GroupDetails = ({ group, onBack, user }) => {
-  const [activeTab, setActiveTab] = useState('membres'); // membres, encheres, votes
+  const [activeTab, setActiveTab] = useState('membres'); 
   const [bidAmount, setBidAmount] = useState(0);
   const [loadingAction, setLoadingAction] = useState(false);
+  const [details, setDetails] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const handleProposeSwap = async (targetPosition) => {
+  useEffect(() => {
+    fetchDetails();
+  }, [group.id]);
+
+  const fetchDetails = async () => {
+    setLoading(true);
+    try {
+      const res = await getGroupDetails(group.id);
+      setDetails(res.data);
+    } catch (err) {
+      console.error("Erreur détails groupe:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleProposeSwap = async (targetUserId) => {
     setLoadingAction(true);
     try {
-      await proposeSwap(group.id, { target_position: targetPosition });
+      await proposeSwap(group.id, { target_user_id: targetUserId });
       alert("Proposition de permutation envoyée au vote !");
+      fetchDetails();
     } catch (err) {
       console.error(err);
-      alert("Proposition envoyée (Démo)");
+      alert("Erreur lors de la proposition de permutation.");
     } finally {
       setLoadingAction(false);
     }
   };
 
-  // Mock data for members
-  const members = [
-    { id: 1, name: "Koffi A.", status: "paid", position: 1, payout_date: "15 Mai 2026", has_taken: true },
-    { id: 2, name: "Amina S.", status: "paid", position: 2, payout_date: "15 Juin 2026", has_taken: false },
-    { id: 3, name: user?.first_name + " " + user?.last_name, status: "pending", position: 3, payout_date: "15 Juillet 2026", has_taken: false, isMe: true },
-    { id: 4, name: "Jean D.", status: "late", position: 4, payout_date: "15 Aout 2026", has_taken: false },
-  ];
+
 
   const handleBid = async () => {
+    if (bidAmount <= 0) return;
     setLoadingAction(true);
     try {
-      await submitBid(group.id, { amount: bidAmount });
+      await submitBid(group.id, { discount_amount: bidAmount });
       alert("Enchère soumise avec succès !");
+      fetchDetails();
     } catch (err) {
       console.error(err);
-      alert("Enchère soumise (Démo)");
+      alert("Erreur lors de la soumission de l'enchère.");
     } finally {
       setLoadingAction(false);
     }
@@ -58,15 +75,27 @@ const GroupDetails = ({ group, onBack, user }) => {
   const handleVote = async (voteId, type) => {
     setLoadingAction(true);
     try {
-      await castVote(voteId, { type });
+      const choice = type === 'yes';
+      await castVote(voteId, { choice });
       alert("Vote enregistré !");
+      fetchDetails();
     } catch (err) {
       console.error(err);
-      alert("Vote enregistré (Démo)");
+      alert("Erreur lors du vote.");
     } finally {
       setLoadingAction(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-tontine-darker flex items-center justify-center">
+        <Loader2 className="w-10 h-10 animate-spin text-tontine-orange" />
+      </div>
+    );
+  }
+
+  const members = details?.members || [];
 
   return (
     <div className="min-h-screen bg-tontine-darker text-white font-inter relative overflow-hidden pb-20">
@@ -83,38 +112,99 @@ const GroupDetails = ({ group, onBack, user }) => {
         </button>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="font-playfair font-bold text-xl">{group?.name || 'Détails du Groupe'}</h1>
+            <h1 className="font-playfair font-bold text-xl">{details?.name || 'Détails du Groupe'}</h1>
             <span className="text-[10px] bg-tontine-orange/20 text-tontine-orange px-2 py-0.5 rounded-lg border border-tontine-orange/30 font-mono font-bold tracking-wider">
-              CODE: {group?.code || 'TON-782'}
+              CODE: {details?.code || 'TON-782'}
             </span>
           </div>
-          <p className="text-xs text-tontine-orange">Cycle {group?.current_cycle}/{group?.members}</p>
+          <p className="text-xs text-tontine-orange">Cycle {details?.current_cycle}/{details?.max_members}</p>
         </div>
       </nav>
 
       <main className="max-w-4xl mx-auto px-4 py-6 relative z-10">
         
+        {/* Admin Actions */}
+        <div className="flex flex-wrap gap-3 mb-8">
+          {details?.creator_id === user?.id && details?.status === 'pending' && (
+            <button 
+              onClick={async () => {
+                if (details.current_members < details.max_members) {
+                  alert(`Le groupe n'est pas encore au complet (${details.current_members}/${details.max_members}).`);
+                  return;
+                }
+                setLoadingAction(true);
+                try {
+                  const { startGroup } = await import('../services/api');
+                  await startGroup(details.id);
+                  alert("Tontine démarrée avec succès !");
+                  fetchDetails();
+                } catch (err) { alert("Erreur lors du démarrage."); }
+                finally { setLoadingAction(false); }
+              }}
+              className="flex-1 bg-gradient-to-r from-green-600 to-emerald-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg flex items-center justify-center gap-2"
+            >
+              <ShieldCheck className="w-5 h-5" /> Démarrer la Tontine
+            </button>
+          )}
+
+          {details?.creator_id === user?.id && details?.status === 'pending' && (
+            <button 
+              onClick={() => {
+                const phone = prompt("Numéro de téléphone de l'invité :");
+                if (phone) {
+                  inviteMember(details.id, { phone }).then(() => {
+                    alert("Invitation envoyée !");
+                    fetchDetails();
+                  }).catch(() => alert("Erreur invitation."));
+                }
+              }}
+              className="flex-1 bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
+            >
+              <Plus className="w-5 h-5 text-tontine-orange" /> Inviter
+            </button>
+          )}
+
+          {details?.status === 'active' && (
+            <button 
+              onClick={async () => {
+                try {
+                  const res = await downloadContract(details.id);
+                  const url = window.URL.createObjectURL(new Blob([res.data]));
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.setAttribute('download', `Contrat_${details.name}.pdf`);
+                  document.body.appendChild(link);
+                  link.click();
+                } catch (err) { alert("Erreur téléchargement contrat."); }
+              }}
+              className="flex-1 bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
+            >
+              <FileDown className="w-5 h-5 text-blue-400" /> Contrat PDF
+            </button>
+          )}
+        </div>
+
         {/* Key Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <div className="glass-panel p-4 rounded-2xl border-l-4 border-tontine-orange">
             <Wallet className="w-5 h-5 text-gray-400 mb-2" />
             <p className="text-xs text-gray-400">Cotisation</p>
-            <p className="font-bold">{group?.amount?.toLocaleString() || 50000} F</p>
+            <p className="font-bold">{(details?.contribution_amount || 0).toLocaleString()} F</p>
           </div>
           <div className="glass-panel p-4 rounded-2xl border-l-4 border-blue-500">
             <ShieldAlert className="w-5 h-5 text-gray-400 mb-2" />
             <p className="text-xs text-gray-400">Caisse Secours</p>
-            <p className="font-bold">25 000 F</p>
+            <p className="font-bold">{details?.insurance_fund?.toLocaleString() || '0'} F</p>
           </div>
           <div className="glass-panel p-4 rounded-2xl border-l-4 border-green-500">
             <Users className="w-5 h-5 text-gray-400 mb-2" />
             <p className="text-xs text-gray-400">Membres</p>
-            <p className="font-bold">{group?.members || 10}</p>
+            <p className="font-bold">{details?.current_members}/{details?.max_members}</p>
           </div>
           <div className="glass-panel p-4 rounded-2xl border-l-4 border-purple-500">
             <CalendarDays className="w-5 h-5 text-gray-400 mb-2" />
             <p className="text-xs text-gray-400">Fréquence</p>
-            <p className="font-bold">{group?.cycle || 'Mensuel'}</p>
+            <p className="font-bold">{details?.frequency || 'Mensuel'}</p>
           </div>
         </div>
 
@@ -142,56 +232,6 @@ const GroupDetails = ({ group, onBack, user }) => {
 
         {/* Tab Content */}
         <AnimatePresence mode="wait">
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="glass-panel p-5 rounded-xl mb-6 border border-yellow-500/20 bg-yellow-500/5"
-          >
-            <div className="flex justify-between items-center mb-3">
-              <h4 className="text-sm font-bold flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 text-yellow-500" />
-                Analyse de Risque IA
-              </h4>
-              <span className="text-[10px] bg-yellow-500 text-black px-2 py-0.5 rounded-full font-bold uppercase">Modéré</span>
-            </div>
-            
-            <div className="space-y-3">
-              <p className="text-[11px] text-gray-300 leading-relaxed">
-                L'IA a scanné les membres : <span className="text-white font-medium">2 membres</span> sans KYC vérifié et <span className="text-white font-medium">1 incident</span> de retard détecté.
-              </p>
-              
-              <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-yellow-500 h-full" style={{ width: '42%' }}></div>
-              </div>
-
-              <div className="bg-black/20 p-3 rounded-lg border-l-2 border-yellow-500">
-                <p className="text-[10px] text-yellow-500 font-bold uppercase mb-1">Recommandation IA :</p>
-                <p className="text-[11px] text-gray-400 italic">"Risque de défaut modéré. Nous conseillons l'activation du fonds de garantie pour ce cycle."</p>
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="glass-panel p-4 rounded-xl mb-8 border border-red-500/10"
-          >
-            <h4 className="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-              <ShieldAlert className="w-3 h-3" /> Historique des Incidents
-            </h4>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-[11px] py-2 border-b border-white/5">
-                <span className="text-gray-300">Retard de paiement - Jean D.</span>
-                <span className="text-red-400 font-bold">+2.500 F Amende</span>
-              </div>
-              <div className="flex justify-between items-center text-[11px] py-2 border-b border-white/5 opacity-50">
-                <span className="text-gray-300">Régularisation - Jean D.</span>
-                <span className="text-green-400 font-bold">Soldé</span>
-              </div>
-            </div>
-          </motion.div>
-
           {activeTab === 'membres' && (
             <motion.div 
               key="membres"
@@ -200,50 +240,53 @@ const GroupDetails = ({ group, onBack, user }) => {
               exit={{ opacity: 0, y: -10 }}
               className="space-y-3"
             >
-              {members.map((m) => (
-                <div key={m.id} className={`glass-panel p-4 rounded-xl flex items-center justify-between ${m.isMe ? 'border border-tontine-orange/50 bg-tontine-orange/5' : ''}`}>
-                  <div className="flex items-center gap-4">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg
-                      ${m.has_taken ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-gray-300'}`}>
-                      {m.position}
+              {members.map((m) => {
+                const isMe = m.user_id === user?.id;
+                return (
+                  <div key={m.id} className={`glass-panel p-4 rounded-xl flex items-center justify-between ${isMe ? 'border border-tontine-orange/50 bg-tontine-orange/5' : ''}`}>
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg
+                        ${m.has_taken ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-gray-300'}`}>
+                        {m.position}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-white">{m.user?.full_name || 'Membre'} {isMe && '(Moi)'}</h4>
+                          {!isMe && !m.has_taken && (
+                            <button 
+                              onClick={() => handleProposeSwap(m.user_id)}
+                              className="p-1 bg-white/5 hover:bg-tontine-gold/20 rounded-md text-tontine-gold transition-colors"
+                              title="Proposer une permutation"
+                            >
+                              <ArrowRightLeft className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400">{m.status === 'invited' ? 'Invité' : 'Actif'}</p>
+                      </div>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-white">{m.name} {m.isMe && '(Moi)'}</h4>
-                        {!m.isMe && !m.has_taken && (
-                          <button 
-                            onClick={() => handleProposeSwap(m.position)}
-                            className="p-1 bg-white/5 hover:bg-tontine-gold/20 rounded-md text-tontine-gold transition-colors"
-                            title="Proposer une permutation"
+                    <div className="text-right">
+                      {m.payment_status === 'paid' && <span className="inline-flex items-center gap-1 text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-full mb-1"><CheckCircle2 className="w-3 h-3"/> Payé</span>}
+                      {m.payment_status === 'pending' && <span className="inline-flex items-center gap-1 text-xs text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded-full mb-1"><Clock className="w-3 h-3"/> En attente</span>}
+                      {m.payment_status === 'late' && <span className="inline-flex items-center gap-1 text-xs text-red-400 bg-red-400/10 px-2 py-1 rounded-full mb-1">Retard</span>}
+                      
+                      {m.has_taken && (
+                        <div className="mt-1">
+                          <a 
+                            href={`https://polygonscan.com/tx/${m.blockchain_tx || '0x...'}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-[9px] text-blue-400 hover:text-blue-300 underline flex items-center justify-end gap-1"
                           >
-                            <ArrowRightLeft className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-400">{m.payout_date}</p>
+                            <ShieldCheck className="w-2.5 h-2.5" />
+                            Preuve Blockchain
+                          </a>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="text-right">
-                    {m.status === 'paid' && <span className="inline-flex items-center gap-1 text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-full mb-1"><CheckCircle2 className="w-3 h-3"/> Payé</span>}
-                    {m.status === 'pending' && <span className="inline-flex items-center gap-1 text-xs text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded-full mb-1"><Clock className="w-3 h-3"/> En attente</span>}
-                    {m.status === 'late' && <span className="inline-flex items-center gap-1 text-xs text-red-400 bg-red-400/10 px-2 py-1 rounded-full mb-1">Retard</span>}
-                    
-                    {m.has_taken && (
-                      <div className="mt-1">
-                        <a 
-                          href={`https://polygonscan.com/tx/0x${Math.random().toString(16).slice(2, 10)}...`} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="text-[9px] text-blue-400 hover:text-blue-300 underline flex items-center justify-end gap-1"
-                        >
-                          <ShieldCheck className="w-2.5 h-2.5" />
-                          Preuve Blockchain
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </motion.div>
           )}
 
@@ -257,56 +300,61 @@ const GroupDetails = ({ group, onBack, user }) => {
             >
               <div className="glass-panel p-6 rounded-2xl border border-tontine-gold/20">
                 <h3 className="text-lg font-bold text-tontine-gold mb-4 flex items-center gap-2">
-                  <Gavel className="w-5 h-5" /> Enchère en cours
+                  <Gavel className="w-5 h-5" /> Enchères sur le cycle actuel
                 </h3>
                 
                 {/* Active Bids List */}
                 <div className="space-y-3 mb-6">
-                  <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl border border-white/5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-tontine-gold/20 flex items-center justify-center text-tontine-gold font-bold text-xs">1</div>
-                      <span className="text-sm font-medium">Amina Soule</span>
+                  {details?.active_bids?.length > 0 ? details.active_bids.map((bid, i) => (
+                    <div key={bid.id} className={`flex justify-between items-center p-3 rounded-xl border ${bid.user_id === user?.id ? 'bg-tontine-gold/10 border-tontine-gold/20' : 'bg-white/5 border-white/5'}`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${bid.user_id === user?.id ? 'bg-tontine-gold text-tontine-darker' : 'bg-white/10 text-tontine-gold'}`}>
+                          {i + 1}
+                        </div>
+                        <span className={`text-sm ${bid.user_id === user?.id ? 'font-bold' : ''}`}>
+                          {bid.user?.full_name || 'Membre'} {bid.user_id === user?.id && '(Moi)'}
+                        </span>
+                      </div>
+                      <span className="text-tontine-gold font-bold">{(bid.discount_amount || 0).toLocaleString()} F</span>
                     </div>
-                    <span className="text-tontine-gold font-bold">5.000 F Décote</span>
-                  </div>
-                  <div className="flex justify-between items-center p-3 bg-tontine-gold/10 rounded-xl border border-tontine-gold/20">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-tontine-gold flex items-center justify-center text-tontine-darker font-bold text-xs">2</div>
-                      <span className="text-sm font-bold">Vous</span>
-                    </div>
-                    <span className="text-tontine-gold font-bold">{bidAmount.toLocaleString()} F Décote</span>
-                  </div>
+                  )) : (
+                    <div className="p-4 text-center text-xs text-gray-500 italic">Aucune enchère pour le moment.</div>
+                  )}
                 </div>
 
                 <p className="text-xs text-gray-400 mb-6 leading-relaxed">
                   En proposant une décote, vous pouvez ramasser le pot immédiatement. La décote sera redistribuée aux autres membres.
                 </p>
               
-              <div className="bg-white/5 p-4 rounded-xl mb-6 text-left">
-                <label className="block text-sm text-gray-400 mb-2">Décote proposée (FCFA)</label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="25000" 
-                  step="1000" 
-                  value={bidAmount}
-                  onChange={(e) => setBidAmount(parseInt(e.target.value))}
-                  className="w-full accent-blue-500 mb-2" 
-                />
-                <div className="flex justify-between font-bold">
-                  <span>Pot Final : {(group?.amount * group?.members - bidAmount).toLocaleString()} F</span>
-                  <span className="text-blue-400">-{bidAmount.toLocaleString()} F</span>
+              {details?.status === 'active' && !details?.members?.find(m => m.user_id === user?.id)?.has_taken && (
+                <div className="bg-white/5 p-4 rounded-xl mb-6 text-left">
+                    <label className="block text-sm text-gray-400 mb-2">Proposer une décote (FCFA)</label>
+                    <input 
+                        type="range" 
+                        min="0" 
+                        max={Math.floor((details?.contribution_amount || 50000) * 0.2)} 
+                        step="500" 
+                        value={bidAmount}
+                        onChange={(e) => setBidAmount(parseInt(e.target.value))}
+                        className="w-full accent-tontine-gold mb-2" 
+                    />
+                    <div className="flex justify-between font-bold">
+                        <span className="text-xs">Pot Net : {((details?.contribution_amount || 0) * (details?.max_members || 1) - bidAmount).toLocaleString()} F</span>
+                        <span className="text-tontine-gold">-{bidAmount.toLocaleString()} F</span>
+                    </div>
                 </div>
-              </div>
+              )}
 
-              <button 
-                disabled={loadingAction || bidAmount === 0}
-                onClick={handleBid}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-xl transition duration-300 flex items-center justify-center gap-2"
-              >
-                {loadingAction ? <Loader2 className="w-5 h-5 animate-spin" /> : "Soumettre mon enchère"}
-              </button>
-            </div>
+              {details?.status === 'active' && (
+                <button 
+                    disabled={loadingAction || bidAmount === 0}
+                    onClick={handleBid}
+                    className="w-full bg-tontine-gold text-tontine-darker font-bold py-3 px-4 rounded-xl transition duration-300 flex items-center justify-center gap-2 shadow-lg shadow-tontine-gold/10"
+                >
+                    {loadingAction ? <Loader2 className="w-5 h-5 animate-spin" /> : "Confirmer mon offre"}
+                </button>
+              )}
+              </div>
           </motion.div>
         )}
 
@@ -316,44 +364,53 @@ const GroupDetails = ({ group, onBack, user }) => {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="glass-panel p-6 rounded-2xl"
+              className="space-y-4"
             >
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-purple-500/20 text-purple-400 rounded-full flex items-center justify-center">
-                  <RefreshCcw className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold">Demandes de Permutation</h3>
-                  <p className="text-xs text-gray-400">Votez pour autoriser les échanges.</p>
-                </div>
-              </div>
+              {details?.pending_votes?.length > 0 ? details.pending_votes.map((vote) => (
+                <div key={vote.id} className="glass-panel p-6 rounded-2xl border border-purple-500/30">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-10 h-10 bg-purple-500/20 text-purple-400 rounded-full flex items-center justify-center">
+                      <RefreshCcw className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold">Demande de Permutation</h3>
+                      <p className="text-xs text-gray-400">Initiée par {vote.creator?.full_name || 'un membre'}</p>
+                    </div>
+                  </div>
 
-              <div className="bg-white/5 border border-purple-500/30 p-4 rounded-xl">
-                <p className="text-sm mb-4">
-                  <strong className="text-white">Jean D.</strong> (Position 4) souhaite échanger sa position avec <strong className="text-white">Amina S.</strong> (Position 3).
-                </p>
-                <div className="w-full bg-tontine-dark rounded-full h-2 mb-4">
-                  <div className="bg-purple-500 h-2 rounded-full" style={{ width: '40%' }}></div>
+                  <div className="w-full bg-white/5 rounded-full h-2 mb-4">
+                    <div 
+                        className="bg-purple-500 h-2 rounded-full transition-all duration-500" 
+                        style={{ width: `${(vote.yes_votes / vote.required_votes) * 100}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-6">
+                    {vote.yes_votes} votes favorables sur {vote.required_votes} requis.
+                  </p>
+                  
+                  <div className="flex gap-2">
+                    <button 
+                      disabled={loadingAction}
+                      onClick={() => handleVote(vote.id, 'yes')}
+                      className="flex-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 py-3 rounded-xl text-xs font-bold transition-all border border-green-500/20"
+                    >
+                      {loadingAction ? <Loader2 className="w-4 h-4 animate-spin" /> : "Approuver"}
+                    </button>
+                    <button 
+                      disabled={loadingAction}
+                      onClick={() => handleVote(vote.id, 'no')}
+                      className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 py-3 rounded-xl text-xs font-bold transition-all border border-red-500/20"
+                    >
+                      {loadingAction ? <Loader2 className="w-4 h-4 animate-spin" /> : "Rejeter"}
+                    </button>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-400 mb-4">4/10 votes recueillis (Majorité requise : 6)</p>
-                
-                <div className="flex gap-2">
-                  <button 
-                    disabled={loadingAction}
-                    onClick={() => handleVote(1, 'yes')}
-                    className="flex-1 bg-green-500/20 hover:bg-green-500/40 text-green-400 py-2 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2"
-                  >
-                    {loadingAction ? <Loader2 className="w-4 h-4 animate-spin" /> : "Pour"}
-                  </button>
-                  <button 
-                    disabled={loadingAction}
-                    onClick={() => handleVote(1, 'no')}
-                    className="flex-1 bg-red-500/20 hover:bg-red-500/40 text-red-400 py-2 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2"
-                  >
-                    {loadingAction ? <Loader2 className="w-4 h-4 animate-spin" /> : "Contre"}
-                  </button>
+              )) : (
+                <div className="glass-panel p-10 rounded-2xl text-center border border-white/5">
+                    <RefreshCcw className="w-10 h-10 text-gray-600 mx-auto mb-4 opacity-30" />
+                    <p className="text-sm text-gray-500">Aucune demande de swap en cours dans ce groupe.</p>
                 </div>
-              </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
